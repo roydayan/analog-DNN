@@ -17,13 +17,16 @@ Usage:
     - Calls the `run_experiment` function with the loaded configuration.
 """
 
+# THE CODE (need to install HYDRA, OMEGACONF before using main.py - currently using each script separately)
+"""
 import hydra
 from omegaconf import DictConfig
-from src.run_experiment import run_experiment
+from run_task import run_task
 
 @hydra.main(config_path="../configs", config_name="default", version_base=None)
 def main(cfg: DictConfig):
-    run_experiment(cfg)
+    run_task(cfg)
 
 if __name__ == "__main__":
     main()
+"""

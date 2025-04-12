@@ -1,0 +1,152 @@
+command: python main.py... (* - default, # - comment)
+    - Task: 
+        - error* if none specified
+        - train
+        - fine-tune (need to specify technique)
+        - evaluate
+        - quantize (need to specify technique)
+        - make_analog (need to specify analog characteristics - see what aihwkit requires)
+        # different tasks need different inputs (e.g. inference doesn't need training args)
+
+    - Model:
+        - error* if none specified
+        - toy model saved in repo
+        - user-defined (in saved_models or folder outside of repo)
+
+    - Dataset
+        - ready for applying dataloader*
+        - prepare for dataloader (will all datasets have the right format?)
+
+    - Trainer, optimizer parameters (for train, fine-tune)
+
+    - Save model location
+        - Default repo saved_models folder* w/ default model name*
+        - User-defined folder and model name
+        - Don't saved
+
+    - Save results location
+        - Wandb default folder*
+        - User-defined folder (wandb or not)
+
+
+Pipeline:
+(include UML diagrams for design and flow? -see MATAM)
+
+
+
+
+# src/main.py
+"""
+# Main Script for Running Experiments with Hydra
+
+This script serves as the entry point for running experiments using the Hydra framework. 
+It utilizes a configuration file to manage experiment parameters and delegates the 
+execution to the `run_experiment` function.
+
+Functions:
+    main(cfg: DictConfig): The main function decorated with `@hydra.main` to initialize 
+    the Hydra configuration and execute the experiment.
+
+Usage:
+    - The script is executed as the main module.
+    - It loads the configuration from the `../configs/default.yaml` file.
+    - Calls the `run_experiment` function with the loaded configuration.
+"""
+
+import hydra
+from omegaconf import DictConfig
+from run_task import run_task
+
+@hydra.main(config_path="../configs", config_name="default", version_base=None)
+def main(cfg: DictConfig):
+    run_task(cfg)
+
+if __name__ == "__main__":
+    main()
+
+
+# src/tasks.py
+from omegaconf import DictConfig
+from src.pipelines.train import train
+from src.pipelines.fine_tune import fine_tune
+from src.pipelines.evaluate import evaluate
+from src.pipelines.quantize import quantize
+from src.pipelines.make_analog import make_analog
+
+def run_task(cfg: DictConfig):
+    task_name = cfg.task
+    if task_name == "train":
+        train(cfg)
+    elif task_name == "fine_tune":
+        fine_tune(cfg)
+    elif task_name == "evaluate":
+        evaluate(cfg)
+    elif task_name == "quantize":
+        quantize(cfg)
+    elif task_name == "make_analog":
+        make_analog(cfg)
+
+        """
+    elif task_name == "external_experiment":
+        run_external_experiment(cfg.external_experiment) ??? (like qlora???)
+        """
+        
+    else:
+        raise ValueError(f"Unknown task: {task_name}")
+
+    
+# src/pipelines/train.py
+import os
+import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
+import torchvision.transforms as transforms
+
+from src.training.utils import LitModuleFactory
+
+def train(cfg, train_loader, val_loader):
+
+    # Build model with a factory or any approach you prefer
+    lit_model = LitModuleFactory.create(cfg)
+   
+    
+    if cfg.model.type=="transformer":
+        trainer = make_HuggingFaceTrainer(cfg, lit_model, train_loader, val_loader)
+        trainer.train()
+        
+
+    else:
+        wandb_logger = WandbLogger(project=cfg.logging.wandb.project_name,
+                                    entity=cfg.logging.wandb.entity,
+                                    name=cfg.experiment_name)
+
+        trainer = pl.Trainer(
+            max_epochs=cfg.max_epochs,
+            accelerator=cfg.trainer.accelerator,
+            devices=cfg.trainer.devices,
+            logger=wandb_logger
+        )
+
+        trainer.fit(lit_model, train_loader, val_loader)
+    
+
+
+def make_HuggingFaceTrainer(cfg, model, train_ds, val_ds):
+    from transformers import Trainer as HFTrainer, TrainingArguments  # HuggingFace Trainer
+    training_args = TrainingArguments(
+        output_dir=cfg.output_dir,
+        num_train_epochs=cfg.max_epochs,
+        per_device_train_batch_size=cfg.batch_size,
+        per_device_eval_batch_size=cfg.batch_size,
+        logging_dir=cfg.logging.wandb.log_dir,
+        logging_steps=cfg.logging.wandb.logging_steps,
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
+        report_to="wandb"  # Log to Weights & Biases
+    )
+    trainer = HFTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_ds,
+        eval_dataset=val_ds
+    )
+    return trainer
